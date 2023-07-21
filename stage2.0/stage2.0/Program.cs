@@ -4,6 +4,7 @@ using Microsoft.Win32;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using System.Management;
+
 class Program
 {
     static void Main(string[] args)
@@ -20,18 +21,15 @@ class Program
         var biosAttributes = new BsonDocument();
         foreach (ManagementObject obj in searcher.Get())
         {
-
             string biosSerialNumber = obj["SerialNumber"]?.ToString();
-
-
             Console.WriteLine("BIOS Serial Number: " + biosSerialNumber);
             Console.WriteLine();
 
             // Store the BIOS attributes in the biosAttributes document
-
             biosAttributes.Add("SerialNumber", biosSerialNumber);
             serialNumber = biosSerialNumber;
         }
+
         // Query the software component information from the Windows Registry
         RegistryKey softwareKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
         if (softwareKey != null)
@@ -42,7 +40,6 @@ class Program
             // Add the BIOS serial number as the first element in the softwareComponentsDocument
             softwareComponentsDocument.Add("BIOS_SerialNumber", serialNumber);
 
-
             foreach (string subKeyName in softwareKey.GetSubKeyNames())
             {
                 using (RegistryKey subKey = softwareKey.OpenSubKey(subKeyName))
@@ -50,24 +47,25 @@ class Program
                     string displayName = subKey.GetValue("DisplayName")?.ToString();
                     string version = subKey.GetValue("DisplayVersion")?.ToString();
                     string publisher = subKey.GetValue("Publisher")?.ToString();
-
+                    string licensePeriod = subKey.GetValue("LicensePeriod")?.ToString();
+                    Console.WriteLine(displayName);
+                    Console.WriteLine(version);
+                    Console.WriteLine(publisher);
                     // Check if any of the values are null
                     if (displayName != null && version != null && publisher != null)
                     {
-                        string uniqueKey = GetUniqueKey(displayName, counter);
+                        string uniqueKey = $"{displayName} ({counter})";
 
                         // Create a BsonDocument with software component fields
                         BsonDocument softwareComponent = new BsonDocument
                         {
-
                             { "DisplayName", displayName },
                             { "Version", version },
                             { "Publisher", publisher }
                         };
 
                         // Use the uniqueKey as the key in the softwareComponentsDocument
-                        softwareComponentsDocument.Add(uniqueKey, softwareComponent);
-
+                        softwareComponentsDocument[uniqueKey] = softwareComponent;
                         counter++;
                     }
                 }
