@@ -18,11 +18,11 @@ class Program
     [DllImport("user32.dll")]
     private static extern int GetWindowTextLength(IntPtr hWnd);
 
-    static Dictionary<IntPtr, ApplicationInfo> runningApplications;
+    static BsonDocument applicationUsageDocument;
     static Timer timer;
     static MongoClient client;
     static IMongoDatabase database;
-    static IMongoCollection<ApplicationInfo> collection;
+    static IMongoCollection<BsonDocument> collection;
 
     static void Main()
     {
@@ -32,9 +32,9 @@ class Program
 
         client = new MongoClient(connectionString);
         database = client.GetDatabase(databaseName);
-        collection = database.GetCollection<ApplicationInfo>(collectionName);
+        collection = database.GetCollection<BsonDocument>(collectionName);
 
-        runningApplications = new Dictionary<IntPtr, ApplicationInfo>();
+        applicationUsageDocument = new BsonDocument();
 
         timer = new Timer();
         timer.Interval = 1000; // 1 second
@@ -54,38 +54,41 @@ class Program
         string foregroundWindowTitle = GetWindowTitle(foregroundWindowHandle);
 
         // Check if the foreground window is different from the previous one
-        if (!runningApplications.ContainsKey(foregroundWindowHandle))
+        if (!applicationUsageDocument.Contains(foregroundWindowTitle))
         {
-            // Store the entry time for the new application
-            ApplicationInfo application = new ApplicationInfo
+            applicationUsageDocument.Add(foregroundWindowTitle, new BsonDocument
             {
-                Id = ObjectId.GenerateNewId(),
-                EntryTime = DateTime.Now,
-                MainWindowTitle = foregroundWindowTitle
-            };
-            runningApplications[foregroundWindowHandle] = application;
+                { "EntryTime", DateTime.Now },
+                { "UsageDuration", new BsonInt64(0) }
+            });
         }
         else
         {
             // Update the usage duration for the current application
-            ApplicationInfo application = runningApplications[foregroundWindowHandle];
-            application.UsageDuration = DateTime.Now - application.EntryTime;
+            BsonDocument applicationInfo = applicationUsageDocument[foregroundWindowTitle].AsBsonDocument;
+            TimeSpan currentUsageDuration = DateTime.Now - applicationInfo["EntryTime"].AsDateTime;
+            applicationInfo["UsageDuration"] = new BsonInt64(currentUsageDuration.Ticks);
         }
 
         // Print the application usage information
         Console.Clear();
-        Console.WriteLine("Running Applications:");
+        Console.WriteLine("Application Usage:");
 
-        foreach (var kvp in runningApplications)
+        foreach (BsonElement element in applicationUsageDocument)
         {
-            Console.WriteLine($"Application: {kvp.Value.MainWindowTitle}");
-            Console.WriteLine($"Entry Time: {kvp.Value.EntryTime}");
-            Console.WriteLine($"Usage Duration: {kvp.Value.UsageDuration}");
+            string applicationTitle = element.Name;
+            BsonDocument applicationInfo = element.Value.AsBsonDocument;
+            DateTime entryTime = applicationInfo["EntryTime"].AsDateTime;
+            TimeSpan usageDuration = TimeSpan.FromTicks(applicationInfo["UsageDuration"].AsInt64);
+
+            Console.WriteLine($"Application: {applicationTitle}");
+            Console.WriteLine($"Entry Time: {entryTime}");
+            Console.WriteLine($"Usage Duration: {usageDuration}");
             Console.WriteLine();
         }
 
-        // Insert the new data into the MongoDB collection
-        collection.InsertMany(runningApplications.Values);
+        // Insert or update the data in the MongoDB collection
+        collection.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", ObjectId.Empty), applicationUsageDocument, new UpdateOptions { IsUpsert = true });
     }
 
     static string GetWindowTitle(IntPtr handle)
@@ -96,12 +99,4 @@ class Program
         string windowTitle = titleBuilder.ToString();
         return windowTitle;
     }
-}
-
-class ApplicationInfo
-{
-    public ObjectId Id { get; set; }
-    public DateTime EntryTime { get; set; }
-    public string MainWindowTitle { get; set; }
-    public TimeSpan UsageDuration { get; set; }
 }
